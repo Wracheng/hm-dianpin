@@ -13,6 +13,7 @@ import com.hmdp.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
@@ -52,7 +53,7 @@ public class BlogController {
     }
 
     @GetMapping("/of/me")
-    public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
+    public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current, HttpServletRequest request) {
         // 获取登录用户
         UserDTO user = UserHolder.getUser();
         // 根据用户查询
