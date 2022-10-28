@@ -14,8 +14,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -34,7 +36,12 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
     public Result queryType() {
         // 从redis里面获取商铺类型
         List<String> shopTypeList = stringRedisTemplate.opsForList().range(RedisConstants.CACHE_SHOP_KEY, 0, -1);
+        List<ShopType> shopList = new ArrayList<>();
         assert shopTypeList != null;
+        for(String item : shopTypeList){
+            ShopType shopType = JSONUtil.toBean(item, ShopType.class);
+            shopList.add(shopType);
+        }
         if(shopTypeList.size() == 0){
            // 去数据库里查
             List<ShopType> list = list();
@@ -45,10 +52,11 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
             for(ShopType item : list){
                 String JsonItem = JSONUtil.toJsonStr(item);
                 stringRedisTemplate.opsForList().leftPush(RedisConstants.CACHE_SHOP_KEY,JsonItem);
+                stringRedisTemplate.expire(RedisConstants.CACHE_SHOP_KEY,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
             }
             return Result.ok(list);
         }else{
-            String str = JSONUtil.toJsonStr(shopTypeList);
+            String str = JSONUtil.toJsonStr(shopList);
             List<ShopType> list = JSONUtil.toList(str, ShopType.class);
             return Result.ok(list);
         }
