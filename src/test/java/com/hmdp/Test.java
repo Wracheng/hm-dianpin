@@ -1,5 +1,6 @@
 package com.hmdp;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
@@ -28,9 +29,6 @@ public class Test {
     private StringRedisTemplate stringRedisTemplate;
     @org.junit.jupiter.api.Test
     public void test(){
-        JSONArray objects = JSONUtil.parseArray("[{\"icon\":\"/types/ms.png\",\"updateTime\":1640229871000,\"sort\":1,\"createTime\":1640175467000,\"name\":\"美食\",\"id\":1}]");
-        System.out.println(objects);
-        List<ShopType> shopTypes = JSONUtil.toList(objects, ShopType.class);
-        System.out.println(shopTypes);
+        System.out.println(StrUtil.isNotBlank(null));
     }
 }

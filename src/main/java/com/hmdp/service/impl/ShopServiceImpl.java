@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -31,6 +33,41 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private StringRedisTemplate stringRedisTemplate;
     @Override
     public Result queryShopInfo(Long id) {
+        // 解决缓存穿透
+       // return  this.queryShopInfoHandleCT(id);
+       // 解决缓存击穿和缓存穿透
+        return  this.queryShopInfoHandleJC(id);
+    }
+
+    // 解决缓存穿透
+    public Result queryShopInfoHandleCT(Long id){
+        // TODO  去redis中查看能不能查到
+        String info = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
+        // 判断该类型是有值的字符串
+        if(StrUtil.isNotBlank(info)){
+            // json转bean
+            Shop shop = JSONUtil.toBean(info, Shop.class);
+            return Result.ok(shop);
+        }else {
+            // 重点 如果从redis取出来是""，说明是为了防止缓存穿透加的值，店铺是不存在的
+            if (Objects.equals(info, "")){
+                return Result.fail("店铺不存在");
+            }
+            // TODO redis中查不到去数据库查
+            Shop shopInfo = getById(id);
+            if(shopInfo == null){
+                // 重点 为了防止缓存穿透，在数据库查不到的时候在缓存加一个值
+                stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id,"",2,TimeUnit.MINUTES);
+                return Result.fail("店铺不存在");
+            }
+            // TODO 数据库中查到了就存入redis，查不到就返回该商品不存在
+            String shopStr = JSONUtil.toJsonStr(shopInfo);
+            stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, shopStr,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+            return Result.ok(shopInfo);
+        }
+    }
+    // 解决缓存击穿（里面也融合了解决缓存穿透）
+    public Result queryShopInfoHandleJC(Long id){
         // TODO  去redis中查看能不能查到
         String info = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + "id");
         // 判断该类型是有值的字符串
@@ -38,19 +75,45 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             // json转bean
             Shop shop = JSONUtil.toBean(info, Shop.class);
             return Result.ok(shop);
-
         }else{
-            // TODO redis中查不到去数据库查
-            Shop shopInfo = getById(id);
-            if(shopInfo == null){
-                return Result.fail("店铺不存在");
+            // 获取锁
+            try {
+                boolean isGet = tryGetLock(id);
+                if(isGet){
+                    // 再次查缓存，防止有线程已经用过锁把redis写入了
+                    String info2 = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
+                    // 也是要的，防止其他线程数据库查不到，然后建立了一个临时的空值key
+                    if (Objects.equals(info2, "")){
+                        return Result.fail("店铺不存在");
+                    }
+                    // 说明缓存有值了
+                    if(info2 != null){
+                        Shop shop = JSONUtil.toBean(info2, Shop.class);
+                        return Result.ok(shop);
+                    }
+                    // 查询数据库
+                    Shop shopInfo = getById(id);
+                    if(shopInfo == null){
+                        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id,"",2,TimeUnit.MINUTES);
+                        return Result.fail("店铺不存在");
+                    }
+                    // 数据库查到了
+                    String shopStr = JSONUtil.toJsonStr(shopInfo);
+                    // 写入redis
+                    stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, shopStr,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+                    return Result.ok(shopInfo);
+                }else{
+                    Thread.sleep(50);
+                    // 再次查找
+                    return queryShopInfoHandleJC(id);
+                }
+            }catch (Exception e){
+               throw new RuntimeException(e);
+            } finally{
+                // 有异常也要删除锁
+                deleteLock(RedisConstants.LOCK_SHOP_KEY + id);
             }
-            // TODO 数据库中查到了就存入redis，查不到就返回该商品不存在
-            String shopStr = JSONUtil.toJsonStr(shopInfo);
-            stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + "id", shopStr,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-            return Result.ok(shopInfo);
         }
-
     }
 
     @Override
@@ -68,5 +131,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + id);
 
         return Result.ok("操作成功");
+    }
+
+    // 获取互斥锁
+    public boolean tryGetLock(Object key){
+        // 采用setnx 没有就操作的方法来充当锁
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(RedisConstants.LOCK_SHOP_KEY + key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+        return BooleanUtil.isTrue(flag);
+    }
+    // 释放锁
+    public void deleteLock(String key){
+        stringRedisTemplate.delete(key);
     }
 }
