@@ -80,7 +80,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             try {
                 boolean isGet = tryGetLock(id);
                 if(isGet){
-                    // 再次查缓存，防止有线程已经用过锁把redis写入了
+                    // 重点 再次查缓存，防止有线程已经用过锁把redis写入了
                     String info2 = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
                     // 也是要的，防止其他线程数据库查不到，然后建立了一个临时的空值key
                     if (Objects.equals(info2, "")){
