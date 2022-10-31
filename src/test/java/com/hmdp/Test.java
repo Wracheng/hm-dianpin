@@ -48,9 +48,9 @@ public class Test {
         Shop shopInfo = s.getById(1L);
         RedisData redisData = new RedisData();
         redisData.setData(shopInfo);
-        redisData.setExpireTime(LocalDateTime.now().plusSeconds(5));
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(108000));
         String redisDataStr = JSONUtil.toJsonStr(redisData);
-        stringRedisTemplate.opsForValue().set(RedisConstants.LOCK_SHOP_KEY + 1, redisDataStr);
+        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + 1, redisDataStr);
         System.out.println(shopInfo);
     }
 }
