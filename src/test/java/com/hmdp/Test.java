@@ -19,6 +19,7 @@ import com.baomidou.mybatisplus.extension.service.impl.*;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,7 +40,8 @@ public class Test {
 
     @org.junit.jupiter.api.Test
     public void test() {
-        System.out.println(StrUtil.isNotBlank(null));
+        LocalDateTime of = LocalDateTime.of(2022, 1, 1, 0, 0, 0);
+        System.out.println(of.toEpochSecond(ZoneOffset.UTC));
     }
 
     // junit的方法必须public void
