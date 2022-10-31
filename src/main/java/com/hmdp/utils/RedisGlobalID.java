@@ -18,16 +18,18 @@ import java.util.regex.Pattern;
 public class RedisGlobalID {
     // 开始时间戳，这里用2022年1月1日0点举个例子
     private final long BEGIN_STAMPTIME = 1640995200L;
+    private final int COUNT_BITS = 32;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
-    public void getId(String prefix){
+    public long getId(String prefix){
         // 获取时间戳
         LocalDateTime now = LocalDateTime.now();
         long nowStampTime = now.toEpochSecond(ZoneOffset.UTC);
-        long l = nowStampTime - BEGIN_STAMPTIME;
+        long stamp = nowStampTime - BEGIN_STAMPTIME;
         // 获取序列号
         String date = now.format(DateTimeFormatter.ofPattern("yyyy:MM:dd"));
-        stringRedisTemplate.opsForValue().increment("icr:" + prefix + date);
+        Long count = stringRedisTemplate.opsForValue().increment("icr:" + prefix + date);
         // 重点 拼接返回，数值类型的拼接需要移位
+        return stamp << COUNT_BITS | count;
     }
 }
