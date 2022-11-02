@@ -37,7 +37,7 @@ public class RefalshInterceptor implements HandlerInterceptor {
         if(userInfo.isEmpty()){
             return true;
         }
-        // 存到ThreadLocal中，保证每个请求的数据没有干扰，因为session域有可能
+        // 存到ThreadLocal中，保证每个请求的数据没有干扰，因为session域有可能被污染
         UserDTO userDTO = BeanUtil.fillBeanWithMap(userInfo, new UserDTO(), false);
         UserHolder.saveUser(userDTO);
         // 刷新token的有效期
