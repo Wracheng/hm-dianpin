@@ -87,4 +87,8 @@ public class Test {
         System.out.println("消耗的时间=" + (end - start));
         // 执行完上述操作后，redis中多了一个 key: icr:shop12022:11:01，value： 60000
     }
+    @org.junit.jupiter.api.Test
+    public void test1(){
+        redisGlobalID.nextId("6");
+    }
 }
