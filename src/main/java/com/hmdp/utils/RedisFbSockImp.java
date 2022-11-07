@@ -2,6 +2,9 @@ package com.hmdp.utils;
 
 import cn.hutool.core.lang.UUID;
 import org.apache.ibatis.annotations.Insert;
+import org.redisson.Redisson;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -26,6 +29,8 @@ public class RedisFbSockImp implements RedisFbSock {
     // static 提前定义好，就不用每次释放锁都来创建
     private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private RedissonClient redissonClient;
     static {
         UNLOCK_SCRIPT = new  DefaultRedisScript<>();
         UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));

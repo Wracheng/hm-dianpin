@@ -12,5 +12,5 @@ import com.hmdp.dto.Result;
  * @since 2021-12-22
  */
 public interface IVoucherOrderService extends IService<VoucherOrder> {
-    Result seckillOneCoupon(Long id);
+    Result seckillOneCoupon(Long id) throws InterruptedException;
 }

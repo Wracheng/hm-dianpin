@@ -10,16 +10,19 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisFbSockImp;
 import com.hmdp.utils.RedisGlobalID;
 import com.hmdp.utils.UserHolder;
+import org.redisson.Redisson;
+import org.redisson.api.RLock;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
- *  服务实现类
+ * 服务实现类
  * </p>
  *
  * @author 虎哥
@@ -37,15 +40,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private Redisson redisson;
+
     // 用乐观锁悲观锁的实现方式（只适用非集群）
     public Result seckillOneCoupon1(Long id) {
         // 查规定时间
         SeckillVoucher coupon = seckillVoucherService.getById(id);
-        if(coupon.getEndTime().isBefore(LocalDateTime.now()) || coupon.getBeginTime().isAfter(LocalDateTime.now())){
+        if (coupon.getEndTime().isBefore(LocalDateTime.now()) || coupon.getBeginTime().isAfter(LocalDateTime.now())) {
             return Result.fail("不在规定时间");
         }
         // 查库存
-        if(coupon.getStock() <= 0){
+        if (coupon.getStock() <= 0) {
             return Result.fail("库存不足了" + coupon.getStock());
         }
        /* // 重点 这里如果线程被抢走，就会出现超卖问题，这里用乐观锁的CAS法，只判断库存是否和原先查到的一致来判断线程是否安全，而由于业务场景，就算有不安全问题，库存只要存在即可扣减
@@ -59,25 +65,26 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Long userId = UserHolder.getUser().getId();
         // Long的toString是new了一个新的对象创建的，所以地址还是不一样的，需要用实习生方法转
         // 重点 这么写是先提交事务再释放悲观锁（√）  如果在@Transactional里面加悲观锁就会导致先释放锁再提交事务，一旦释放锁，未提交事务前又要出问题 （×）
-        synchronized (userId.toString().intern()){
+        synchronized (userId.toString().intern()) {
             return voucherOrderService.createCouponOrder(id);
         }
     }
+
     // 使用Redis分布式锁的方式
     @Override
-    public Result seckillOneCoupon(Long id) {
+    public Result seckillOneCoupon(Long id) throws InterruptedException {
         // 查规定时间
         SeckillVoucher coupon = seckillVoucherService.getById(id);
-        if(coupon.getEndTime().isBefore(LocalDateTime.now()) || coupon.getBeginTime().isAfter(LocalDateTime.now())){
+        if (coupon.getEndTime().isBefore(LocalDateTime.now()) || coupon.getBeginTime().isAfter(LocalDateTime.now())) {
             return Result.fail("不在规定时间");
         }
         // 查库存
-        if(coupon.getStock() <= 0){
+        if (coupon.getStock() <= 0) {
             return Result.fail("库存不足了" + coupon.getStock());
         }
         Long userId = UserHolder.getUser().getId();
 
-        // 获取锁  opoo -- one people one order 一人一单业务
+        /*// 获取锁  opoo -- one people one order 一人一单业务
         RedisFbSockImp redisFbSockImp = new RedisFbSockImp("opoo:" + userId, stringRedisTemplate);
         boolean isGetLock = redisFbSockImp.tryGetLock(10);
         if(!isGetLock){
@@ -88,21 +95,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return voucherOrderService.createCouponOrder(id);
         } finally {
             redisFbSockImp.unLock();
+        }*/
+
+        // 使用Redisson获取锁
+        RLock lock = redisson.getLock("lock:opoo:" + userId);
+        // lock.tryLock(1, 10, TimeUnit.SECONDS);  1是失败等待多少时间重试一次重试成功就成功，失败就失败，10是锁的超时时间，默认30s
+        boolean isGetLock = lock.tryLock(1, 10, TimeUnit.SECONDS);
+        if (!isGetLock) {
+            return Result.fail("请勿重复下单");
+        }
+        try {
+            return voucherOrderService.createCouponOrder(id);
+        } finally {
+            lock.unlock();
         }
     }
+
     // 事务所有异常都会回滚，默认是运行时异常才会回滚
     @Transactional(rollbackFor = Exception.class)
-    public Result createCouponOrder(Long id){
+    public Result createCouponOrder(Long id) {
         // ----   一人一单，为了防止一个人使用工具狂抢造成的安全问题，需要加锁
         // 查询优惠券列表是否存在该人
         Long userId = UserHolder.getUser().getId();
         Integer count = query().eq("user_id", userId).eq("voucher_id", id).count();
-        if(count > 0){
+        if (count > 0) {
             return Result.fail("只能抢一次");
         }
         // 扣减库存（在这里同时解决了超卖问题）
-        boolean success = seckillVoucherService.update().setSql("stock = stock - 1").eq("voucher_id", id).gt("stock",0).update();
-        if(!success){
+        boolean success = seckillVoucherService.update().setSql("stock = stock - 1").eq("voucher_id", id).gt("stock", 0).update();
+        if (!success) {
             return Result.fail("库存扣减失败");
         }
         // 创建优惠券订单
