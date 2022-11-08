@@ -164,8 +164,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setVoucherId(id);
         voucherOrder.setId(orderId);
         voucherOrder.setUserId(userId);
-        //
-
+        // 添加到消息队列
+        orderTasks.add(voucherOrder);
         return Result.ok(orderId);
 
     }
@@ -208,6 +208,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             log.error("不能重复下单");
             return;
         }
-
+        try{
+            // 这里为什么不用加sync，因为在lua脚本里已经保证一人一单了，不需要加锁，这里只需要处理符合一人一单规则的创建订单就行了
+            voucherOrderService.createCouponOrder(voucherOrder.getId());
+        }finally {
+            lock.unlock();
+        }
     }
 }
