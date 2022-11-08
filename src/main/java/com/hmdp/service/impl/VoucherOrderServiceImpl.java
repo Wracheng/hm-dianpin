@@ -10,15 +10,21 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisFbSockImp;
 import com.hmdp.utils.RedisGlobalID;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.redisson.Redisson;
 import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
+import java.util.concurrent.*;
 
 /**
  * <p>
@@ -28,6 +34,7 @@ import java.util.concurrent.TimeUnit;
  * @author 虎哥
  * @since 2021-12-22
  */
+@Slf4j
 @Service
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
@@ -42,7 +49,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private StringRedisTemplate stringRedisTemplate;
     @Resource
     private Redisson redisson;
+    // static 提前定义好，就不用每次释放锁都来创建
+    private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+    static {
+        SECKILL_SCRIPT = new  DefaultRedisScript<>();
+        SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+        SECKILL_SCRIPT.setResultType(Long.class);
+    }
+    // 当有任务的时候执行，没有的时候会阻塞等待
+    private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    private static final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
+    @PostConstruct
+    // 项目启动时会执行该方法
+    private void init(){
+        SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
+    };
+    public class VoucherOrderHandler implements Runnable{
 
+        @Override
+        public void run() {
+            while (true){
+                try {
+                    VoucherOrder take = orderTasks.take();
+
+                } catch (InterruptedException e) {
+                    log.error("处理订单异常",e);
+                }
+            }
+        }
+    }
     // 用乐观锁悲观锁的实现方式（只适用非集群）
     public Result seckillOneCoupon1(Long id) {
         // 查规定时间
@@ -71,8 +106,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     // 使用Redis分布式锁的方式
-    @Override
-    public Result seckillOneCoupon(Long id) throws InterruptedException {
+    public Result seckillOneCoupon2(Long id) throws InterruptedException {
         // 查规定时间
         SeckillVoucher coupon = seckillVoucherService.getById(id);
         if (coupon.getEndTime().isBefore(LocalDateTime.now()) || coupon.getBeginTime().isAfter(LocalDateTime.now())) {
@@ -111,6 +145,31 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     }
 
+    // 使用lua脚本 + 线程 （提前返回成功消息，后续用消息队列慢慢创建订单）
+    @Override
+    public Result seckillOneCoupon(Long id){
+
+        // 优惠券开始时间结束时间这里没写
+
+        Long userId = UserHolder.getUser().getId();
+        // 执行lua脚本
+        Long execute = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), id.toString(), userId.toString());
+        int res = execute.intValue();
+        if(res != 0){
+            return Result.fail(res == 1 ? "库存不足" : "请勿重复下单");
+        }
+        // 将创建订单交给另外一个线程的消息队列
+        long orderId = redisGlobalID.nextId("coupon_order");
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setVoucherId(id);
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(userId);
+        //
+
+        return Result.ok(orderId);
+
+    }
+
     // 事务所有异常都会回滚，默认是运行时异常才会回滚
     @Transactional(rollbackFor = Exception.class)
     public Result createCouponOrder(Long id) {
@@ -138,5 +197,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 其他字段应该有默认值
         save(voucherOrder);
         return Result.ok();
+    }
+
+    public void handleOrder(VoucherOrder voucherOrder){
+        Long userId = voucherOrder.getUserId();
+        RLock lock = redisson.getLock("lock:order:" + userId);
+        boolean b = lock.tryLock();
+        // 只是兜底，可不判断
+        if(!b){
+            log.error("不能重复下单");
+            return;
+        }
+
     }
 }
