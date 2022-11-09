@@ -57,7 +57,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setResultType(Long.class);
     }
     // 当有任务的时候执行，没有的时候会阻塞等待
-    private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
     private static final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
     @PostConstruct
     // 项目启动时会执行该方法
@@ -71,7 +71,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             while (true){
                 try {
                     VoucherOrder take = orderTasks.take();
-
+                    handleOrder(take);
                 } catch (InterruptedException e) {
                     log.error("处理订单异常",e);
                 }

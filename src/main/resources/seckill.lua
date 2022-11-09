@@ -6,6 +6,7 @@
 
 local couponId = ARGV[1];
 local userId = ARGV[2];
+local orderId = ARGV[3];
 -- ..是拼接字符串的意思
 local stockKey = "seckill:stock:" .. couponId
 local orderKey = "seckill:order:" .. couponId
@@ -20,8 +21,12 @@ if(redis.call('sismember',orderKey,userId) >= 1) then
     return 2;
 end
 
--- 扣库存
+-- redis扣库存
 redis.call('incrby',stockKey,-1);
 
---下单
+-- redis下单
 redis.call('sadd',orderKey,userId);
+
+-- 添加消息到队列中
+redis.call();
+return 0;
