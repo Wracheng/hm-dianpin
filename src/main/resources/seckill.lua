@@ -28,5 +28,5 @@ redis.call('incrby',stockKey,-1);
 redis.call('sadd',orderKey,userId);
 
 -- 添加消息到队列中
-redis.call();
+redis.call('xadd','stream.orders','*','userId',userId,'voucherId',couponId,'id',orderId);
 return 0;
