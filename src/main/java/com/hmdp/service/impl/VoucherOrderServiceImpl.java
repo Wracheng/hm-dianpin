@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
 import com.hmdp.utils.RedisGlobalID;
 import com.hmdp.utils.UserHolder;
+import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.connection.stream.*;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.Redisson;
@@ -56,7 +57,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private StringRedisTemplate stringRedisTemplate;
     @Resource
-    private Redisson redisson;
+    private RedissonClient redisson;
     // static 提前定义好，就不用每次释放锁都来创建
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
     static {
