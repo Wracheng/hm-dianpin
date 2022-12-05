@@ -5,19 +5,24 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.ScrollResult;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
+import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.BlogMapper;
 import com.hmdp.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -35,6 +40,8 @@ import java.util.stream.Collectors;
 public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
     @Resource
     private IUserService userService;
+    @Resource
+    private IFollowService followService;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -87,6 +94,85 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 .stream().map(user -> BeanUtil.copyProperties(user, UserDTO.class))
                 .collect(Collectors.toList());
         return Result.ok(userDtos);
+    }
+
+    @Override
+    public Result saveBlog(Blog blog) {
+
+        // 获取登录用户
+        UserDTO user = UserHolder.getUser();
+        blog.setUserId(user.getId());
+        // 保存探店博文
+        boolean isSuccess = save(blog);
+        if(!isSuccess){
+            return Result.fail("保存失败");
+        }
+        // 找到自己的关注者（粉丝）
+        List<Follow> FollowList = followService.query().eq("follow_user_id", user.getId()).list();
+        for(Follow item : FollowList){
+            Long userId = item.getUserId();
+            String key = "feed:" + userId;
+
+            // 推送到粉丝的收件箱
+            stringRedisTemplate.opsForZSet().add(key,blog.getId().toString(),System.currentTimeMillis());
+        }
+        // 返回id
+        return Result.ok(blog.getId());
+    }
+
+    @Override
+    public Result queryBlogOfFollow(Long max, Integer offset) {
+        // 找到当前用户
+        Long userId = UserHolder.getUser().getId();
+        String key = "feed:" + userId;
+        // 查询收件箱   查到的是博客的id和一个score（在这里是时间戳），offset
+        // zrangebyscore key名 最小排序值 最大排序值 [withscores] [limit 从第index（从0开始）个数据开始 取n个数据]
+        Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet().reverseRangeByScoreWithScores(key, 0, max, offset, 2);
+        if(typedTuples ==null || typedTuples.isEmpty()){
+            // 本身就没有信息
+            return Result.ok();
+        }
+
+        long minTime = 0;
+        // 相同的score（时间戳）重复了几次, 手动让os移动，因为在zset中,offset是【相同的score的个数，从开始】
+        int os = 1;
+        // 专门存放收件箱查到的博客id
+        ArrayList<Long> ids = new ArrayList<>(typedTuples.size());
+        // 解析出blogId、minTime、offset
+        for(ZSetOperations.TypedTuple<String> item : typedTuples){
+            // 获取id并添加到ids List集合中
+            ids.add(Long.valueOf(item.getValue()));
+
+            // 获取分数（时间戳）
+            long time = item.getScore().longValue();
+            // 后面查到的肯定比前面查到的时间戳小于或等于
+            if(time == minTime){
+                os ++;
+            }else{
+                minTime = time;
+                os = 1;
+            }
+
+        }
+
+        // 根据id查询对应的文章
+        String idStr = StrUtil.join(",", ids);
+        List<Blog> blogs = query().in("id",ids).last("ORDER BY FIELD(id," + idStr + ")").list();
+
+        // 判断关注
+        for(Blog item : blogs){
+            // 判断这篇文章该用户是否点赞
+            isLiked(item);
+            // 查看这篇文章相关的点赞用户
+            likeBlogRank(item.getId());
+        }
+
+        ScrollResult scrollResult = new ScrollResult();
+        scrollResult.setList(blogs);
+        scrollResult.setOffset(os);
+        scrollResult.setMinTime(minTime);
+
+        return Result.ok(scrollResult);
     }
 
     // 判断用户是否点赞，存到Blog Bean中
