@@ -29,7 +29,7 @@ public class FollowController {
     }
 
     // 查有没有关注该用户
-    @GetMapping("/or/not/${id}")
+    @GetMapping("/or/not/{id}")
     public Result isFocus(@PathVariable("id") Long id){
         return followService.focus(id);
     }

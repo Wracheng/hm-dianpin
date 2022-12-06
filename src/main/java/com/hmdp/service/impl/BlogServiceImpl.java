@@ -134,7 +134,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
 
         long minTime = 0;
-        // 相同的score（时间戳）重复了几次, 手动让os移动，因为在zset中,offset是【相同的score的个数，从开始】
+        // 相同的score（时间戳）重复了几次, 手动让os移动，因为在zset中,相同的score需要指定是哪一个score，需要用到偏移量
         int os = 1;
         // 专门存放收件箱查到的博客id
         ArrayList<Long> ids = new ArrayList<>(typedTuples.size());

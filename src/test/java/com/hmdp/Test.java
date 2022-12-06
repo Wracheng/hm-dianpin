@@ -15,6 +15,8 @@ import com.hmdp.utils.RedisGlobalID;
 import com.hmdp.utils.RegexUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import com.baomidou.mybatisplus.extension.service.impl.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,9 +24,12 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * @author Mr.Wang
@@ -45,6 +50,9 @@ public class Test {
 
     @Resource
     private ServiceImpl<ShopMapper, Shop> s;
+
+    @Resource
+    private IShopService shopService;
 
     @org.junit.jupiter.api.Test
     public void test() {
@@ -90,5 +98,28 @@ public class Test {
     @org.junit.jupiter.api.Test
     public void test1(){
         redisGlobalID.nextId("6");
+    }
+
+    // 将坐标导入redis
+    @org.junit.jupiter.api.Test
+    public void  loadShopData(){
+        // 查询店铺信息
+        List<Shop> list = shopService.list();
+        // 把list变成shopTypeId :  list<Shop> 的形式
+        Map<Long, List<Shop>> map = list.stream().collect(Collectors.groupingBy(Shop::getTypeId));
+        // 分批完成写入redis  Map.Entry比Map拿value更方便
+        for(Map.Entry<Long, List<Shop>> item : map.entrySet()){
+            // 获取类型id
+            Long typeId = item.getKey();
+            String key = "shop:geo:" + typeId;
+            // 获取同类型店铺的集合
+            List<Shop> value = item.getValue();
+            // RedisGeoCommands.GeoLocation<String> 是一个里面有name和Point对象的 一个对象，其中String是name的类型
+            ArrayList<RedisGeoCommands.GeoLocation<String>> lcoations = new ArrayList<>(value.size());
+            for(Shop item2 : value){
+                lcoations.add(new RedisGeoCommands.GeoLocation<>(item2.getId().toString(), new Point(item2.getX(),item2.getY())));
+            }
+            stringRedisTemplate.opsForGeo().add(key,lcoations);
+        }
     }
 }
