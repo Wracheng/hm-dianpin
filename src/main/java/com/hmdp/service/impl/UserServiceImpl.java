@@ -14,14 +14,19 @@ import com.hmdp.service.IUserService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.SystemConstants;
+import com.hmdp.utils.UserHolder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -102,6 +107,61 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("未填手机号或密码");
         }
         return Result.fail("登陆失败");
+    }
+
+    @Override
+    public Result sign() {
+        // 获取登录用户
+        Long id = UserHolder.getUser().getId();
+        // 获取当前日期
+        LocalDateTime now = LocalDateTime.now();
+        // 拼接key
+        String suffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = "sign:" + id + suffix;
+
+        // 获取今天是第几天
+        int dayOfMonth = now.getDayOfMonth();
+        // dayOfMonth - 1是因为第一天是因为从0开始计数
+        stringRedisTemplate.opsForValue().setBit(key, dayOfMonth - 1, true);
+        return Result.ok();
+    }
+
+    @Override
+    public Result siginCount() {
+        // 获取登录用户
+        Long id = UserHolder.getUser().getId();
+        // 获取当前日期
+        LocalDateTime now = LocalDateTime.now();
+        // 拼接key
+        String suffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = "sign:" + id + suffix;
+
+        // 获取今天是第几天
+        int dayOfMonth = now.getDayOfMonth();
+
+        // 获取截止到今天为止本月的签到记录，返回十进制数字 BITFIELD key GET u14 0，返回list是因为bitField不仅可以get，也可以set，get的结果放在了list第一项
+        List<Long> result = stringRedisTemplate.opsForValue().bitField(key, BitFieldSubCommands.create().get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0));
+        if(result == null || result.isEmpty()){
+            return Result.ok(0);
+        }
+
+        // 这个num 是二进制转十进制之后的值，不是1出现的次数，更不是连续签到的次数
+        Long num = result.get(0);
+        if(num == null || num == 0){
+            return  Result.ok(0);
+        }
+        int count = 0;
+        while (true){
+            // 看num的最后一位是不是0，是0就是未签到
+            if((num & 1) == 0){
+                break;
+            }else{
+                count ++;
+            }
+            // 也可写成 num >>>= 1，把数字右移一位
+            num = num >> 1;
+        }
+        return Result.ok(count);
     }
 
     private User createUserByPhone(String phone) {
