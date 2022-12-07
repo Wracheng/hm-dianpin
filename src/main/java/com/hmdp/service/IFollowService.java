@@ -17,4 +17,6 @@ public interface IFollowService extends IService<Follow> {
     Result focus(Long id);
 
     Result isFoucus(Long id, Boolean flag);
+
+    Result commonFocus(Long id);
 }

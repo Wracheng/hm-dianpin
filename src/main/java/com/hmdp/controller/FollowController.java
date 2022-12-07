@@ -34,4 +34,8 @@ public class FollowController {
         return followService.focus(id);
     }
 
+    @GetMapping("/common/{id}")
+    public Result commonFocus(@PathVariable("id") Long id){
+        return followService.commonFocus(id);
+    }
 }

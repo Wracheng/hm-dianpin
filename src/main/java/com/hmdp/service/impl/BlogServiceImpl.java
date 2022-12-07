@@ -45,6 +45,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
     @Override
     public Result queryById(long id) {
         Blog blog = getById(id);
@@ -94,30 +95,6 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 .stream().map(user -> BeanUtil.copyProperties(user, UserDTO.class))
                 .collect(Collectors.toList());
         return Result.ok(userDtos);
-    }
-
-    @Override
-    public Result saveBlog(Blog blog) {
-
-        // 获取登录用户
-        UserDTO user = UserHolder.getUser();
-        blog.setUserId(user.getId());
-        // 保存探店博文
-        boolean isSuccess = save(blog);
-        if(!isSuccess){
-            return Result.fail("保存失败");
-        }
-        // 找到自己的关注者（粉丝）
-        List<Follow> FollowList = followService.query().eq("follow_user_id", user.getId()).list();
-        for(Follow item : FollowList){
-            Long userId = item.getUserId();
-            String key = "feed:" + userId;
-
-            // 推送到粉丝的收件箱
-            stringRedisTemplate.opsForZSet().add(key,blog.getId().toString(),System.currentTimeMillis());
-        }
-        // 返回id
-        return Result.ok(blog.getId());
     }
 
     @Override
@@ -173,6 +150,28 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         scrollResult.setMinTime(minTime);
 
         return Result.ok(scrollResult);
+    }
+
+    @Override
+    public Result saveBlog(Blog blog) {
+        // 获取登录用户
+        UserDTO user = UserHolder.getUser();
+        blog.setUserId(user.getId());
+        // 保存探店博文
+        boolean isSuccess = save(blog);
+        if (!isSuccess){
+            return Result.fail("新增笔记失败");
+        }
+        // 查询笔记作者的所有粉丝
+        List<Follow> follows = followService.query().eq("follow_user_id", user.getId()).list();
+        // 推送笔记id给所有粉丝
+        for(Follow item : follows){
+            Long userId = item.getUserId();
+            String key = "feed:" + userId;
+            stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(),System.currentTimeMillis());
+        }
+        // 返回id
+        return Result.ok(blog.getId());
     }
 
     // 判断用户是否点赞，存到Blog Bean中
